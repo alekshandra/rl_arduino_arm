@@ -47,7 +47,7 @@ class Environment(gym.Env):
         self.angles = np.array([angle1, angle2, angle3, angle4], dtype=np.float32)
         self.calculate_positions()
         self.calculate_light_beam()
-        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=1, atol=0.01)
+        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=0.01)
         close = np.any(np.logical_and(close[:, 0], close[:, 1]))
         self.state = np.concatenate([self.angles, [close]])
         self.off_line_counter = 0
@@ -57,7 +57,7 @@ class Environment(gym.Env):
         return self.state
 
     def step(self, action):
-        # print(self.state)
+        print("Environment State: ", self.state)
         self.previous_previous_state = self.previous_state
         self.previous_state = self.state
         self.angles += action/10
@@ -65,15 +65,16 @@ class Environment(gym.Env):
         self.calculate_positions()
         self.calculate_light_beam()
 
-        # print(self.light_positions[1, :-1])
-        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=1, atol=0.01)
+        print("Environment Light Positions: ", self.light_positions[1, :-1])
+        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=0.01)
         close = np.any(np.logical_and(close[:, 0], close[:, 1]))
-        # print(close)
+        print("Environment Close: ", close)
         self.state = np.concatenate([self.angles, [close]])
 
-        # print(self.state)
+        print("Environement State: ", self.state)
         if not close:
             self.off_line_counter += 1
+            print("Environement Off Line Counter: ", self.off_line_counter)
 
         done = self.off_line_counter >= 10
 
