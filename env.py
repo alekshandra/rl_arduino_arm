@@ -4,15 +4,62 @@ from matplotlib import pyplot as plt
 
 
 class Environment(gym.Env):
+    """
+    ### Description
+    This environment represents a robotic arm with 4 joints: one is at the base allowing the arm to rotate about the z-axis;
+    the rest of the joints operate in a plane and the environment makes use of this to calculate positions.
+
+    ### Action Space
+    The agent takes a 4-element vector for actions.
+    Each element can take a continuous range of values between -1 and 1.
+    This is scaled down by a factor and corresponds to how much each angle should change
+
+    ### Observation Space
+    The observation is an array with shape (10,) with elements corresponding to:
+    | Num | Observation | Min | Max|
+    |-----|-------------|-----|----|
+    |  0  | Curr Angle0 |  0  | 180|
+    |  1  | Curr Angle1 |  0  | 180|
+    |  2  | Curr Angle2 |  0  | 180|
+    |  3  | Curr Angle3 |  0  | 180|
+    |  4  | Curr Sensor |  0  |   1|
+    |  5  | Prev Angle0 |  0  | 180|
+    |  6  | Prev Angle1 |  0  | 180|
+    |  7  | Prev Angle2 |  0  | 180|
+    |  8  | Prev Angle3 |  0  | 180|
+    |  9  | Prev Sensor |  0  |   1|
+
+    ### Rewards and Penalties
+    A reward is given when the arm moves, this is equal to the sum of the absolute difference
+    in angles from one state to the next
+    The environment penalises the robot if:
+        1. the wrist is not pointing downwards, a necessary condition for the light sensor to register anything
+        2. it moves off the line, the penalty gets heavier for each step it remains off the line
+        3. violating physical constraints - going through the floor, exceeding ranges of angles
+
+    ### Starting State
+    The environment is initialised with the angles at [90, 90, 0, 0]
+    The arm looks like this:
+                                     ============
+                                     ||        ||
+                                     ||        ||
+                                     ||
+                              _______||________________
+
+    ### Episode Termination
+    The episode terminates when the arm spends 10 or more turns off the line
+    """
     def __init__(self):
-        self.previous_previous_state = None
+        self.current_state = None
+        # self.previous_previous_state = None
         self.light_z_angle = None
         self.light_planar_positions = None
         self.light_positions = None
         self.planar_positions = None
         self.positions = None
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32)
-        self.observation_space = gym.spaces.Box(low=0.0, high=np.array([180, 180, 180, 180, 1]), shape=(4+1,))
+        self.observation_space = gym.spaces.Box(low=0.0, high=np.array([180, 180, 180, 180, 1, 180, 180, 180, 180, 1]),
+                                                shape=(4+1+4+1,))
 
         self.base_height = 75
         self.first_length = 125
@@ -47,47 +94,52 @@ class Environment(gym.Env):
         self.angles = np.array([angle1, angle2, angle3, angle4], dtype=np.float32)
         self.calculate_positions()
         self.calculate_light_beam()
-        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=0.01)
+        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=1)
         close = np.any(np.logical_and(close[:, 0], close[:, 1]))
-        self.state = np.concatenate([self.angles, [close]])
+        self.current_state = np.concatenate([self.angles, [close]])
+        self.previous_state = self.current_state
+        self.state = np.concatenate([self.current_state, self.previous_state])
         self.off_line_counter = 0
-        self.previous_state = None
-        self.previous_previous_state = None
+        # self.previous_previous_state = None
 
         return self.state
 
     def step(self, action):
         print("Environment State: ", self.state)
-        self.previous_previous_state = self.previous_state
-        self.previous_state = self.state
-        self.angles += action/10
+        # self.previous_previous_state = self.previous_state
+        self.previous_state = self.current_state
+        self.angles += action/100
 
         self.calculate_positions()
         self.calculate_light_beam()
 
         print("Environment Light Positions: ", self.light_positions[1, :-1])
-        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=0.01)
+        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=1)
         close = np.any(np.logical_and(close[:, 0], close[:, 1]))
         print("Environment Close: ", close)
-        self.state = np.concatenate([self.angles, [close]])
+        self.current_state = np.concatenate([self.angles, [close]])
+        self.state = np.concatenate([self.current_state, self.previous_state])
 
-        print("Environement State: ", self.state)
+        print("Environment State: ", self.state)
         if not close:
             self.off_line_counter += 1
-            print("Environement Off Line Counter: ", self.off_line_counter)
+            print("Environment Off Line Counter: ", self.off_line_counter)
+        if close and self.off_line_counter > 0:
+            self.off_line_counter = 0
+            print("Environment Off Line Counter (RESET!): ", self.off_line_counter)
 
         done = self.off_line_counter >= 10
 
-        # print("Wrist Penalty: ", -1 * np.abs(self.light_z_angle))
-        # print("Off Line Penalty: ", self.off_line_counter/10)
-        # print("Angle Change Reward: ", np.sum(np.abs(self.state - self.previous_state)))
-        reward = -100 * np.abs(self.light_z_angle)  # Penalty for the wrist not pointing down
-        reward -= 10 * self.off_line_counter ** 2 # Penalty for being off the line, will increase with time spent off
-        reward += np.sum(np.abs(self.state - self.previous_state))  # Reward for changing the angles
+        print("Environment Wrist Penalty: ", -10 * np.abs(self.light_z_angle))
+        print("Environment Off Line Penalty: ", self.off_line_counter ** 2)
+        print("Environment Angle Change Reward: ", 10 * np.sum(np.abs(self.current_state - self.previous_state)))
+        reward = -10 * np.abs(self.light_z_angle)  # Penalty for the wrist not pointing down
+        reward -= self.off_line_counter ** 2  # Penalty for being off the line, will increase with time spent off
+        reward += 10 * np.sum(np.abs(self.current_state - self.previous_state))  # Reward for changing the angles
 
-        if self.previous_previous_state is not None:
-            reward += np.sum(np.abs(self.state - self.previous_previous_state))  # Reward for changing the angles
-        if self.state[-1] < 0:
+        # if self.previous_previous_state is not None:
+        #     reward += np.sum(np.abs(self.current_state - self.previous_previous_state)) Reward for changing the angles
+        if self.positions[-1, -1] < 0:
             reward -= 1000  # Penalty for going below the ground
         if self.angles[0] < 0 or self.angles[0] > 180:
             reward -= 1000  # Penalty for violating angle 0 constraint
