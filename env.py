@@ -94,8 +94,10 @@ class Environment(gym.Env):
         self.angles = np.array([angle1, angle2, angle3, angle4], dtype=np.float32)
         self.calculate_positions()
         self.calculate_light_beam()
-        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=1)
-        close = np.any(np.logical_and(close[:, 0], close[:, 1]))
+        close_x = np.abs(self.light_positions[1, 0]-self.granular_coord[:, 0]) < 1
+        close_y = np.abs(self.light_positions[1, 1]-self.granular_coord[:, 1]) < 1
+        # close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=1)
+        close = np.any(np.logical_and(close_x, close_y))
         self.current_state = np.concatenate([self.angles, [close]])
         self.previous_state = self.current_state
         self.state = np.concatenate([self.current_state, self.previous_state])
@@ -114,41 +116,50 @@ class Environment(gym.Env):
         self.calculate_light_beam()
 
         print("Environment Light Positions: ", self.light_positions[1, :-1])
-        close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=1)
-        close = np.any(np.logical_and(close[:, 0], close[:, 1]))
+        close_x = np.abs(self.light_positions[1, 0] - self.granular_coord[:, 0]) < 1
+        close_y = np.abs(self.light_positions[1, 1] - self.granular_coord[:, 1]) < 1
+        # close = np.isclose(self.light_positions[1, :-1], self.granular_coord, rtol=0, atol=1)
+        close = np.any(np.logical_and(close_x, close_y))
         print("Environment Close: ", close)
         self.current_state = np.concatenate([self.angles, [close]])
         self.state = np.concatenate([self.current_state, self.previous_state])
 
+        reward = 0
         print("Environment State: ", self.state)
         if not close:
             self.off_line_counter += 1
             print("Environment Off Line Counter: ", self.off_line_counter)
         if close and self.off_line_counter > 0:
             self.off_line_counter = 0
+            reward += 100 * self.off_line_counter ** 2
             print("Environment Off Line Counter (RESET!): ", self.off_line_counter)
 
         done = self.off_line_counter >= 10
 
-        print("Environment Wrist Penalty: ", -10 * np.abs(self.light_z_angle))
-        print("Environment Off Line Penalty: ", self.off_line_counter ** 2)
-        print("Environment Angle Change Reward: ", 10 * np.sum(np.abs(self.current_state - self.previous_state)))
-        reward = -10 * np.abs(self.light_z_angle)  # Penalty for the wrist not pointing down
-        reward -= self.off_line_counter ** 2  # Penalty for being off the line, will increase with time spent off
-        reward += 10 * np.sum(np.abs(self.current_state - self.previous_state))  # Reward for changing the angles
+        print("Environment Wrist Penalty: ", -100 * np.abs(self.light_z_angle + np.pi/2 + 0.000001))
+        print("Environment Off Line Penalty: ", 10 * self.off_line_counter ** 2)
+        print("Environment Angle Change Reward: ", 100 * np.sum(np.abs(self.current_state[:4] - self.previous_state[:4])))
+        reward -= 100 * np.abs(self.light_z_angle + np.pi/2 + 0.000001)  # Penalty for the wrist not pointing down
+        reward -= 10 * self.off_line_counter ** 2  # Penalty for being off the line, will increase with time spent off
+        reward += 100 * np.sum(np.abs(self.current_state[:4] - self.previous_state[:4]))  # Reward for changing angles
 
         # if self.previous_previous_state is not None:
         #     reward += np.sum(np.abs(self.current_state - self.previous_previous_state)) Reward for changing the angles
         if self.positions[-1, -1] < 0:
-            reward -= 1000  # Penalty for going below the ground
+            reward -= 1000000  # Penalty for going below the ground
+            done = True
         if self.angles[0] < 0 or self.angles[0] > 180:
-            reward -= 1000  # Penalty for violating angle 0 constraint
+            reward -= 1000000  # Penalty for violating angle 0 constraint
+            done = True
         if self.angles[1] < 0 or self.angles[1] > 180:
-            reward -= 1000  # Penalty for violating angle 1 constraint
+            reward -= 1000000  # Penalty for violating angle 1 constraint
+            done = True
         if self.angles[2] < 0 or self.angles[2] > 180:
-            reward -= 1000  # Penalty for violating angle 2 constraint
+            reward -= 1000000  # Penalty for violating angle 2 constraint
+            done = True
         if self.angles[3] < 0 or self.angles[3] > 180:
-            reward -= 1000  # Penalty for violating angle 3 constraint
+            reward -= 1000000  # Penalty for violating angle 3 constraint
+            done = True
 
         info = {}
 
